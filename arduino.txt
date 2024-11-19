@@ -1,0 +1,143 @@
+Código do arduino:
+
+#include <Servo.h>  // Inclui a biblioteca para controlar o servo motor
+#include <SPI.h>    // Biblioteca para comunicação SPI
+#include <MFRC522.h>  // Biblioteca para o RFID
+
+// Pinos do RFID RC522
+#define SDA_PIN 6
+#define RST_PIN 2
+
+// Criando objetos para o RFID e o servo
+MFRC522 rfid(SDA_PIN, RST_PIN);
+Servo servo;
+
+// Definindo os pinos dos LEDs, do buzzer, do sensor ultrassônico e do servo motor
+const int ledVerde = 8;
+const int ledAmarelo = 9;
+const int ledVermelho = 10;
+const int buzzer = 3; 
+const int trigPin = 5;  
+const int echoPin = 4;
+const int servoPin = 7;  // Pino do servo motor
+
+int contagemObstruida = 0;  // Variável para armazenar a contagem de leituras consecutivas menores que 20 cm
+
+void setup() {
+  // Configurando os pinos como saída e entrada
+  pinMode(ledVerde, OUTPUT);
+  pinMode(ledAmarelo, OUTPUT);
+  pinMode(ledVermelho, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Inicia o servo motor no pino definido e configura para a posição inicial (0 graus)
+  servo.attach(servoPin);
+  servo.write(0);  // Define o servo na posição inicial (0 graus)
+
+  // Inicializando comunicação serial
+  Serial.begin(9600);
+
+  // Inicializando o RFID
+  SPI.begin();            // Inicia comunicação SPI
+  rfid.PCD_Init();        // Inicia o módulo RFID
+  Serial.println("Sistema iniciado. Aguardando interações...");
+}
+
+void loop() {
+  // Sequência do semáforo
+  // Ligando o LED Verde (trânsito livre)
+  digitalWrite(ledVerde, HIGH);
+  delay(5000);
+  digitalWrite(ledVerde, LOW);
+  
+  // Ligando o LED Amarelo e o Buzzer (atenção) e realizando uma leitura do sensor
+  digitalWrite(ledAmarelo, HIGH);
+  digitalWrite(buzzer, HIGH);  // Liga o buzzer
+
+  // Realiza uma leitura do sensor ultrassônico enquanto o LED amarelo está aceso
+  long distancia = lerDistancia();
+  Serial.print("Distância: ");
+  Serial.print(distancia);
+  Serial.println(" cm");
+
+  // Verifica se a distância é menor que 20 cm
+  if (distancia < 20) {
+    contagemObstruida++;  // Incrementa a contagem se a distância for menor que 20 cm
+    if (contagemObstruida == 3) {
+      Serial.println("Barreira Obstruída");  // Imprime quando a contagem chegar a 3
+    }
+  } else {
+    contagemObstruida = 0;  // Reseta a contagem se a distância for maior ou igual a 20 cm
+  }
+  
+  delay(2000);  // Tempo do LED amarelo e do buzzer ligado
+  digitalWrite(ledAmarelo, LOW);
+  digitalWrite(buzzer, LOW);  // Desliga o buzzer
+
+  // Ligando o LED Vermelho (pare) e verificando a distância para acionar o servo
+  digitalWrite(ledVermelho, HIGH);
+  if (distancia >= 20) {
+    servo.write(90);  // Move o servo para 90 graus se a distância for maior ou igual a 20 cm
+    Serial.println("Servo em 90 graus (posição aberta).");
+  }
+
+  delay(1000);
+  // Leitura do RFID para retornar o servo à posição inicial
+  if (detectaTagRFID()) {
+    Serial.println("Tag detectada! Retornando servo à posição inicial.");
+    servo.write(0);  // Retorna o servo para 0 graus
+  }
+  delay(5000);
+
+
+  // Desligando o LED Vermelho e garantindo que o servo volte à posição inicial
+  digitalWrite(ledVermelho, LOW);
+  servo.write(0);  // Garante que o servo volte para 0 graus
+  Serial.println("LED vermelho desligado.");
+}
+
+// Função para ler a distância do sensor ultrassônico
+long lerDistancia() {
+  // Desabilitar o RFID antes da leitura
+  rfid.PCD_AntennaOff();
+
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  // Calcula a duração do pulso do Echo
+  long duracao = pulseIn(echoPin, HIGH);
+  
+  // Calcula a distância em centímetros
+  long distancia = duracao * 0.034 / 2;
+
+  // Reabilitar o RFID após a leitura
+  rfid.PCD_AntennaOn();
+
+  return distancia;
+}
+
+// Função para detectar uma tag RFID
+bool detectaTagRFID() {
+  // Verifica se há uma nova tag presente e se pode ser lida
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return false;  // Nenhuma tag detectada
+  }
+
+  // Exibe o UID da tag no monitor serial
+  Serial.print("UID da Tag: ");
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    Serial.print(rfid.uid.uidByte[i] < 0x10 ? " 0" : " ");
+    Serial.print(rfid.uid.uidByte[i], HEX);
+  }
+  Serial.println();
+
+  rfid.PICC_HaltA();  // Para a leitura da tag
+  return true;        // Tag detectada com sucesso
+}
+
+
